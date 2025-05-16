@@ -1,0 +1,32 @@
+services:
+- type: web
+  name: telegram-stock-bot
+  env: python
+  buildCommand: "pip install -r requirements.txt"
+  startCommand: "python bot.py"
+  envVars:
+    - key: TELEGRAM_BOT_TOKEN
+      fromDatabase:
+        name: telegram-bot-env
+        property: token
+    - key: ALPHA_VANTAGE_API_KEY
+      fromDatabase:
+        name: telegram-bot-env
+        property: api_key
+    - key: WEBHOOK_URL
+      value: https://telegram-stock-bot.onrender.com/webhook
+    - key: PORT
+      value: 8443
+    - key: CACHE_DURATION_STOCKS
+      value: 1800
+    - key: CACHE_DURATION_CRYPTO
+      value: 60
+    - key: ALERT_CHECK_INTERVAL
+      value: 60
+  regions:
+    - singapore
+databases:
+- name: telegram-bot-env
+  databaseName: bot_env
+  user: bot_user
+  plan: free
