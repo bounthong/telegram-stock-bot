@@ -1,6 +1,6 @@
+import tempfile
 import os
 import logging
-import tempfile
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -15,20 +15,24 @@ from telegram.ext import (
 from config import TELEGRAM_BOT_TOKEN, ALERT_CHECK_INTERVAL
 from stock_api import get_current_price, calculate_moving_averages
 from plotter import generate_chart
-from alerts import add_alert, get_alerts, remove_alert, ALERTS  # Added ALERTS import
+from alerts import add_alert, get_alerts, remove_alert, ALERTS
 
-# Logging setup
+# Configure matplotlib for headless environments
+import matplotlib
+matplotlib.use('Agg')  # Set non-interactive backend
+
+# Logging configuration
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", 
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Store paused state for each chat
+# Global state
 PAUSED_CHATS = set()
 
 async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
-    """Check all alerts and notify users if thresholds are reached"""
+    """Check and trigger price alerts"""
     try:
         for chat_id in list(ALERTS.keys()):
             if chat_id in PAUSED_CHATS:
@@ -230,20 +234,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await update.message.reply_text("Invalid symbol or API error.")
     elif action == "alert":
+        parts = text.split()
+        if len(parts) < 2:
+            await update.message.reply_text("Please enter symbol and threshold (e.g., AAPL 100), with optional interval (e.g., AAPL 100 30).")
+            return
         try:
-            parts = text.split()
             symbol = parts[0].upper()
             threshold = float(parts[1])
             interval = int(parts[2]) if len(parts) > 2 else ALERT_CHECK_INTERVAL
+
             if symbol == "USD":
-                await update.message.reply_text("USD is the base currency and cannot be used for alerts. Please enter a valid stock or crypto symbol (e.g., AAPL, USDT).")
-            else:
-                add_alert(chat_id, symbol, threshold, interval)
-                await update.message.reply_text(
-                    f"Alert set for {symbol} at ${threshold:.2f} with check interval {interval} seconds."
-                )
+                await update.message.reply_text("USD is the base currency and cannot be used for alerts.")
+                return
+
+            add_alert(chat_id, symbol, threshold, interval)
+            await update.message.reply_text(
+                f"Alert set for {symbol} at ${threshold:.2f} with check interval {interval} seconds."
+            )
         except ValueError:
-            await update.message.reply_text("Please enter symbol, threshold, and optional interval (e.g., AAPL 100 30).")
+            await update.message.reply_text("Invalid threshold or interval. Use format: SYMBOL THRESHOLD [INTERVAL] (e.g., AAPL 100 30)")
+
+            
     elif action == "chart":
         if text.upper() == "USD":
             await update.message.reply_text("USD is the base currency and cannot be used for charts. Please enter a valid stock or crypto symbol (e.g., AAPL, USDT).")
@@ -265,68 +276,97 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Use /start for the menu or /help for commands.")
 
 async def post_init(application: Application):
-    """Perform post-initialization tasks"""
+    """Initialize webhook if in production"""
     if os.environ.get("ENV") == "prod":
-        webhook_url = os.environ.get("WEBHOOK_URL")
-        if webhook_url:
-            await application.bot.set_webhook(
-                url=f"{webhook_url}/webhook",
-                drop_pending_updates=True
-            )
-            logger.info(f"Webhook set to: {webhook_url}/webhook")
+        webhook_url = os.getenv("WEBHOOK_URL")
+        if not webhook_url:
+            raise ValueError("WEBHOOK_URL must be set in production")
+        
+        await application.bot.set_webhook(
+            url=f"{webhook_url}/webhook",
+            drop_pending_updates=True
+        )
+        logger.info(f"Webhook configured for {webhook_url}")
 
-def main():
-    """Start the bot in either webhook or polling mode"""
-    # Create application
-    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
-
-    # Add handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("cancel", cancel))
-    application.add_handler(CommandHandler("stop", stop))
-    application.add_handler(CommandHandler("restart", restart))
-    application.add_handler(CommandHandler("price", price_command))
-    application.add_handler(CommandHandler("ma", ma_command))
-    application.add_handler(CommandHandler("alert", alert_command))
-    application.add_handler(CommandHandler("chart", chart_command))
-    application.add_handler(CallbackQueryHandler(button))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-    # Schedule the alert check job
+async def setup_application() -> Application:
+    """Configure and return the Telegram application"""
+    application = (
+        ApplicationBuilder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
+    
+    # Add all handlers
+    handlers = [
+        CommandHandler("start", start),
+        CommandHandler("help", help_command),
+        CommandHandler("cancel", cancel),
+        CommandHandler("stop", stop),
+        CommandHandler("restart", restart),
+        CommandHandler("price", price_command),
+        CommandHandler("ma", ma_command),
+        CommandHandler("alert", alert_command),
+        CommandHandler("chart", chart_command),
+        CallbackQueryHandler(button),
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
+    ]
+    
+    for handler in handlers:
+        application.add_handler(handler)
+    
+    # Schedule jobs
     application.job_queue.run_repeating(
-        check_alerts, 
-        interval=ALERT_CHECK_INTERVAL, 
+        check_alerts,
+        interval=ALERT_CHECK_INTERVAL,
         first=10
     )
+    
+    return application
 
-    # Start the bot based on environment
-    if os.environ.get("ENV") == "prod":
-        port = int(os.environ.get("PORT", 8080))
-        webhook_url = os.environ.get("WEBHOOK_URL")
+async def run_webhook(application: Application):
+    """Run in webhook mode for production"""
+    port = int(os.getenv("PORT", 8080))
+    webhook_url = os.getenv("WEBHOOK_URL")
+    
+    await application.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        webhook_url=f"{webhook_url}/webhook",
+        secret_token=os.getenv("WEBHOOK_SECRET", "")
+    )
+
+async def main():
+    """Entry point for the bot"""
+    try:
+        application = await setup_application()
         
-        if not webhook_url:
-            logger.error("WEBHOOK_URL environment variable not set in production!")
-            return
-
-        async def run_webhook():
-            await application.start()
-            await application.updater.start_webhook(
-                listen="0.0.0.0",
-                port=port,
-                url_path="/webhook",
-                webhook_url=f"{webhook_url}/webhook"
-            )
-            logger.info(f"Bot started with webhook on port {port}")
+        if os.environ.get("ENV") == "prod":
+            logger.info("Starting in webhook mode")
+            await run_webhook(application)
+        else:
+            logger.info("Starting in polling mode")
+            await application.run_polling()
             
-            # Keep the application running
-            while True:
-                await asyncio.sleep(3600)
-        
-        asyncio.run(run_webhook())
-    else:
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
-        logger.info("Bot started with polling")
+    except Exception as e:
+        logger.error(f"Failed to start bot: {e}")
+        raise
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    import nest_asyncio
+
+    try:
+        nest_asyncio.apply()  # Apply patch so that we can re-enter the event loop
+        loop = asyncio.get_event_loop()
+
+        application = loop.run_until_complete(setup_application())
+
+        if os.environ.get("ENV") == "prod":
+            logger.info("Starting in webhook mode")
+            loop.run_until_complete(run_webhook(application))
+        else:
+            logger.info("Starting in polling mode")
+            application.run_polling()  # Do not await this
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
