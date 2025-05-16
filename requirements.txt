@@ -1,8 +1,7 @@
-requests==2.28.1
-pandas==2.2.2
-numpy==2.2.5
-python-telegram-bot[job_queue]==20.0
-matplotlib==3.6.2
+python-telegram-bot[job_queue]==20.3
+numpy==1.26.4
+matplotlib==3.7.4
+pandas==1.5.3
 python-dotenv==1.0.1
-uvicorn==0.23.2
-fastapi==0.104.1
+requests==2.28.1
+nest_asyncio==1.5.8
