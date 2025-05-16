@@ -1,8 +1,8 @@
-requests==2.28.1
-pandas==2.2.2
-numpy==2.2.5
+numpy==1.26.4  # Stick with NumPy 1.x for now
+matplotlib==3.7.4  # Version known to work with NumPy 1.x
+pandas==1.5.3  # Downgrade pandas to match NumPy 1.x
 python-telegram-bot[job_queue]==20.0
-matplotlib==3.6.2
+requests==2.28.1
 python-dotenv==1.0.1
 uvicorn==0.23.2
 fastapi==0.104.1
