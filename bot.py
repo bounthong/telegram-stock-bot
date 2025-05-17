@@ -333,7 +333,7 @@ async def run_webhook(application: Application):
         listen="0.0.0.0",
         port=port,
         webhook_url=f"{webhook_url}/webhook",
-        webhook_path="/webhook",
+        #webhook_path="/webhook",
         secret_token=os.getenv("WEBHOOK_SECRET", "")
     )
 
