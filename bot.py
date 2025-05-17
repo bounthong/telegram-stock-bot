@@ -53,6 +53,7 @@ async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send welcome message with inline keyboard"""
+    print("🚀 /start command received")
     keyboard = [
         [InlineKeyboardButton("Get Price", callback_data="price")],
         [InlineKeyboardButton("Moving Averages", callback_data="ma")],
