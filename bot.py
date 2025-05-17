@@ -355,20 +355,13 @@ async def main():
         raise
 
 if __name__ == "__main__":
-    import asyncio
     import nest_asyncio
+    import asyncio
 
-    try:
-        nest_asyncio.apply()  # Apply patch so that we can re-enter the event loop
-        loop = asyncio.get_event_loop()
+    nest_asyncio.apply()
 
-        application = loop.run_until_complete(setup_application())
+    async def run():
+        application = await setup_application()
+        await application.run_polling()
 
-        if os.environ.get("ENV") == "prod":
-            logger.info("Starting in webhook mode")
-            loop.run_until_complete(run_webhook(application))
-        else:
-            logger.info("Starting in polling mode")
-            application.run_polling()  # Do not await this
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+    asyncio.run(run())
